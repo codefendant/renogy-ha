@@ -70,7 +70,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "enabled" if communication_hub_enabled else "disabled",
     )
 
-    device_data_callback = lambda device: _handle_device_update(hass, entry, device)
+    async def device_data_callback(device: RenogyBLEDevice) -> None:
+        """Forward coordinator device updates to the integration handler."""
+        await _handle_device_update(hass, entry, device)
 
     if communication_hub_enabled:
         from .hub_coordinator import RenogyHubBluetoothCoordinator
