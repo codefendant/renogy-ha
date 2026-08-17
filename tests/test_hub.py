@@ -3,14 +3,36 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
+import sys
+import types
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from custom_components.renogy.hub import (
-    RenogyHubBatteryManager,
-    hub_battery_identifier,
-)
+
+def _load_hub_module() -> Any:
+    """Load hub.py without executing the integration package initializer."""
+    repo_root = Path(__file__).resolve().parents[1]
+    custom_components_path = str(repo_root / "custom_components")
+    renogy_path = str(repo_root / "custom_components" / "renogy")
+
+    custom_components_pkg = types.ModuleType("custom_components")
+    custom_components_pkg.__path__ = [custom_components_path]
+    sys.modules["custom_components"] = custom_components_pkg
+
+    renogy_pkg = types.ModuleType("custom_components.renogy")
+    renogy_pkg.__path__ = [renogy_path]
+    sys.modules["custom_components.renogy"] = renogy_pkg
+
+    sys.modules.pop("custom_components.renogy.hub", None)
+    return importlib.import_module("custom_components.renogy.hub")
+
+
+hub_module = _load_hub_module()
+RenogyHubBatteryManager = hub_module.RenogyHubBatteryManager
+hub_battery_identifier = hub_module.hub_battery_identifier
 
 
 @dataclass
@@ -39,7 +61,7 @@ def _battery(slave_id: int, **data: Any) -> Any:
     return SimpleNamespace(slave_id=slave_id, parsed_data=data)
 
 
-def _manager(results: list[_FakeResult]) -> tuple[RenogyHubBatteryManager, _FakeHub]:
+def _manager(results: list[_FakeResult]) -> tuple[Any, _FakeHub]:
     fake_hub = _FakeHub(results)
     manager = RenogyHubBatteryManager(
         object(),
