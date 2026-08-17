@@ -136,6 +136,7 @@ def test_hub_option_has_user_facing_label() -> None:
         "custom_components/renogy/translations/en.json",
     ):
         strings = json.loads((repo_root / relative_path).read_text())
-        assert strings["options"]["step"]["init"]["data"][
-            "communication_hub_enabled"
-        ] == expected
+        assert (
+            strings["options"]["step"]["init"]["data"]["communication_hub_enabled"]
+            == expected
+        )
