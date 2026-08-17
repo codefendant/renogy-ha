@@ -164,10 +164,10 @@ def _install_module_stubs() -> None:
     renogy_pkg.__path__ = [renogy_path]
     sys.modules["custom_components.renogy"] = renogy_pkg
 
-    const_stub = cast(Any, types.ModuleType("custom_components.renogy.const"))
-    const_stub.ATTR_MANUFACTURER = "Renogy"
-    const_stub.DOMAIN = "renogy"
-    sys.modules["custom_components.renogy.const"] = const_stub
+    # hub_sensor.py can safely use the real integration constants.
+    # Do not leave a synthetic custom_components.renogy.const module behind,
+    # because later tests import the actual integration package.
+    sys.modules.pop("custom_components.renogy.const", None)
 
     hub_stub = cast(Any, types.ModuleType("custom_components.renogy.hub"))
     hub_stub.RenogyHubBatteryState = _BatteryState
@@ -178,9 +178,17 @@ def _install_module_stubs() -> None:
 
 
 def _load_hub_sensor_module() -> Any:
+    """Load the Hub sensor module without leaking test stubs to later tests."""
     _install_module_stubs()
     sys.modules.pop("custom_components.renogy.hub_sensor", None)
-    return importlib.import_module("custom_components.renogy.hub_sensor")
+
+    module = importlib.import_module("custom_components.renogy.hub_sensor")
+
+    # The Hub model is stubbed only for these focused unit tests.
+    # Remove it after import so unrelated tests see the production module.
+    sys.modules.pop("custom_components.renogy.hub", None)
+
+    return module
 
 
 def test_hub_sensor_descriptions_expose_only_validated_telemetry() -> None:
