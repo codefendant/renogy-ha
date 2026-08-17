@@ -41,11 +41,7 @@ class RenogyHubBluetoothCoordinator(RenogyActiveBluetoothCoordinator):
     async def _read_device_data(self, service_info: Any) -> bool:
         """Read the primary device, then poll Hub batteries when enabled."""
         success = await super()._read_device_data(service_info)
-        if (
-            not success
-            or self._hub_battery_manager is None
-            or self.device is None
-        ):
+        if not success or self._hub_battery_manager is None or self.device is None:
             return success
 
         await self._async_update_hub_batteries(self.device)
