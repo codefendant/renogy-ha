@@ -39,6 +39,7 @@ from .const import (
     LOGGER,
     DeviceType,
 )
+from .hub_sensor import setup_hub_battery_sensors
 
 # Registry of sensor keys
 KEY_BATTERY_VOLTAGE = "battery_voltage"
@@ -952,6 +953,14 @@ async def async_setup_entry(
         async_add_entities(device_entities)
     else:
         LOGGER.warning("No entities were created")
+
+    # Add logical child-battery entities for Communication Hub responders.
+    # The helper exits immediately when Hub support is disabled.
+    setup_hub_battery_sensors(
+        config_entry,
+        coordinator,
+        async_add_entities,
+    )
 
 
 def create_entities_helper(
