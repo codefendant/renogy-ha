@@ -184,9 +184,10 @@ def _load_hub_sensor_module() -> Any:
 
     module = importlib.import_module("custom_components.renogy.hub_sensor")
 
-    # The Hub model is stubbed only for these focused unit tests.
-    # Remove it after import so unrelated tests see the production module.
+    # Hub-specific imports are scoped to these focused tests. Remove them after
+    # import so unrelated platform tests load the production modules afresh.
     sys.modules.pop("custom_components.renogy.hub", None)
+    sys.modules.pop("custom_components.renogy.const", None)
 
     return module
 
