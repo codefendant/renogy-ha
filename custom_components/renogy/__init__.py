@@ -10,12 +10,13 @@ from homeassistant.const import CONF_ADDRESS, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 
-from . import const as renogy_const
 from .const import (
+    CONF_COMMUNICATION_HUB_ENABLED,
     CONF_DEVICE_TYPE,
     CONF_NON_SHUNT_CONNECTION_MODE,
     CONF_SCAN_INTERVAL,
     CONF_SHUNT_CONNECTION_MODE,
+    DEFAULT_COMMUNICATION_HUB_ENABLED,
     DEFAULT_DEVICE_TYPE,
     DEFAULT_NON_SHUNT_CONNECTION_MODE,
     DEFAULT_SCAN_INTERVAL,
@@ -25,19 +26,6 @@ from .const import (
     DeviceType,
 )
 from .device_name import has_real_device_name
-
-# Keep imports compatible with lightweight test stubs that predate Hub support.
-# The real integration constants define these values identically.
-CONF_COMMUNICATION_HUB_ENABLED = getattr(
-    renogy_const,
-    "CONF_COMMUNICATION_HUB_ENABLED",
-    "communication_hub_enabled",
-)
-DEFAULT_COMMUNICATION_HUB_ENABLED = getattr(
-    renogy_const,
-    "DEFAULT_COMMUNICATION_HUB_ENABLED",
-    False,
-)
 
 if TYPE_CHECKING:
     from .ble import RenogyBLEDevice
