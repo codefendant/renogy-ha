@@ -87,7 +87,9 @@ def setup_hub_battery_sensors(
         if new_entities:
             async_add_entities(new_entities)
 
-    config_entry.async_on_unload(coordinator.async_add_listener(_add_discovered_batteries))
+    config_entry.async_on_unload(
+        coordinator.async_add_listener(_add_discovered_batteries)
+    )
     _add_discovered_batteries()
 
 

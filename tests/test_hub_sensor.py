@@ -72,9 +72,9 @@ def _install_module_stubs() -> None:
     passive_module.PassiveBluetoothCoordinatorEntity = PassiveBluetoothCoordinatorEntity
     sys.modules["homeassistant.components"] = components_module
     sys.modules["homeassistant.components.bluetooth"] = bluetooth_module
-    sys.modules[
-        "homeassistant.components.bluetooth.passive_update_coordinator"
-    ] = passive_module
+    sys.modules["homeassistant.components.bluetooth.passive_update_coordinator"] = (
+        passive_module
+    )
 
     sensor_module = cast(Any, types.ModuleType("homeassistant.components.sensor"))
 
@@ -171,8 +171,8 @@ def _install_module_stubs() -> None:
 
     hub_stub = cast(Any, types.ModuleType("custom_components.renogy.hub"))
     hub_stub.RenogyHubBatteryState = _BatteryState
-    hub_stub.hub_battery_identifier = (
-        lambda address, slave_id: f"{address}:hub:{slave_id:02X}"
+    hub_stub.hub_battery_identifier = lambda address, slave_id: (
+        f"{address}:hub:{slave_id:02X}"
     )
     sys.modules["custom_components.renogy.hub"] = hub_stub
 
@@ -265,10 +265,7 @@ def test_hub_battery_0x33_is_child_device_with_validated_values() -> None:
         module.RenogyHubBatterySensor(coordinator, 0x33, description)
         for description in module.HUB_BATTERY_SENSORS
     ]
-    entities_by_key = {
-        entity.entity_description.key: entity
-        for entity in entities
-    }
+    entities_by_key = {entity.entity_description.key: entity for entity in entities}
 
     assert entities_by_key["battery_voltage"].native_value == 50.4
     assert entities_by_key["battery_remaining_capacity"].native_value == 44.493
