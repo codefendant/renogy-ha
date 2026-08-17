@@ -70,26 +70,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "enabled" if communication_hub_enabled else "disabled",
     )
 
-    coordinator_kwargs = {
-        "hass": hass,
-        "logger": LOGGER,
-        "address": device_address,
-        "scan_interval": scan_interval,
-        "device_type": device_type,
-        "shunt_connection_mode": shunt_connection_mode,
-        "non_shunt_connection_mode": non_shunt_connection_mode,
-        "device_data_callback": lambda device: _handle_device_update(hass, entry, device),
-    }
+    device_data_callback = lambda device: _handle_device_update(hass, entry, device)
 
     if communication_hub_enabled:
         from .hub_coordinator import RenogyHubBluetoothCoordinator
 
         coordinator = RenogyHubBluetoothCoordinator(
-            **coordinator_kwargs,
+            hass=hass,
+            logger=LOGGER,
+            address=device_address,
+            scan_interval=scan_interval,
+            device_type=device_type,
+            shunt_connection_mode=shunt_connection_mode,
+            non_shunt_connection_mode=non_shunt_connection_mode,
+            device_data_callback=device_data_callback,
             communication_hub_enabled=True,
         )
     else:
-        coordinator = RenogyActiveBluetoothCoordinator(**coordinator_kwargs)
+        coordinator = RenogyActiveBluetoothCoordinator(
+            hass=hass,
+            logger=LOGGER,
+            address=device_address,
+            scan_interval=scan_interval,
+            device_type=device_type,
+            shunt_connection_mode=shunt_connection_mode,
+            non_shunt_connection_mode=non_shunt_connection_mode,
+            device_data_callback=device_data_callback,
+        )
 
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 

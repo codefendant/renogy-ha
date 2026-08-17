@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 from tests.test_init import _install_module_stubs
 
 
-def _load_init_module_with_hub_stub() -> tuple[Any, type, type]:
+def _load_init_module_with_hub_stub() -> tuple[Any, Any, Any]:
     """Load the integration with base and Hub coordinator stubs."""
     base_coordinator_class = _install_module_stubs()
     assert base_coordinator_class is not None
