@@ -184,10 +184,15 @@ def _load_hub_sensor_module() -> Any:
 
     module = importlib.import_module("custom_components.renogy.hub_sensor")
 
-    # Hub-specific imports are scoped to these focused tests. Remove them after
-    # import so unrelated platform tests load the production modules afresh.
+    # Hub-specific imports and the synthetic integration package are scoped to
+    # these focused tests. Remove them after import so unrelated platform tests
+    # load the production package and constants afresh.
     sys.modules.pop("custom_components.renogy.hub", None)
     sys.modules.pop("custom_components.renogy.const", None)
+    sys.modules.pop("custom_components.renogy", None)
+    custom_components_pkg = sys.modules.get("custom_components")
+    if custom_components_pkg is not None:
+        custom_components_pkg.__dict__.pop("renogy", None)
 
     return module
 
