@@ -9,13 +9,13 @@
       "manufacturer_id": 57676
     },
     {
+      "local_name": "RNGRBP*"
+    },
+    {
       "local_name": "RNGC*"
     },
     {
       "local_name": "RNGPRO*"
-    },
-    {
-      "local_name": "RNGRBP*"
     },
     {
       "local_name": "RTMShunt300*"
