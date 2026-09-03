@@ -37,8 +37,9 @@ from .device_name import has_real_device_name
 if TYPE_CHECKING:
     from .ble import RenogyBLEDevice
 
-# List of platforms this integration supports
-PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
+# Read-only diagnostic build: intentionally omit Platform.NUMBER so no writable
+# inverter number entity is exposed while locating the RIV4835 Program 28 register.
+PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.SWITCH]
 
 
 class _CoordinatorShutdownProtocol(Protocol):
