@@ -28,10 +28,13 @@ from .const import (
     ATTR_MANUFACTURER,
     CONF_DEVICE_NAME,
     CONF_DEVICE_TYPE,
+    CONF_INVERTER_PROFILE,
     DEFAULT_DEVICE_TYPE,
+    DEFAULT_INVERTER_PROFILE,
     DOMAIN,
     LOGGER,
     RENOGY_REGO_INVERTER_PREFIX,
+    RIV4835CSH1S_INVERTER_PROFILE,
     DCCRegister,
     DeviceType,
     InverterRegister,
@@ -45,6 +48,10 @@ class RenogyNumberEntityDescription(NumberEntityDescription):
     register: int = 0
     # Scale factor: device value = HA value * scale
     scale: float = 1.0
+    # Some validated writable setpoints are not yet part of the polling profile.
+    # Preserve the value most recently written by Home Assistant until readback
+    # support is available for that model.
+    retain_written_value: bool = False
 
 
 # DCC voltage parameters (all use 0.1V scale, range 7-17V for 12V system)
@@ -334,6 +341,29 @@ INVERTER_ALL_NUMBERS: tuple[RenogyNumberEntityDescription, ...] = (
     ),
 )
 
+# RIV4835CSH1S Program 28: Maximum AC Charging Current.
+# Hardware validation on RIV4835CSH1S confirmed that 0 A disables utility battery
+# charging while preserving AC bypass, and 10 A produces approximately 10 A of
+# line charging. The register uses the same x10 encoding as other inverter
+# setpoints. The RIV polling profile does not yet read back this register, so the
+# entity retains the most recently written value between coordinator refreshes.
+RIV4835CSH1S_NUMBERS: tuple[RenogyNumberEntityDescription, ...] = (
+    RenogyNumberEntityDescription(
+        key="inverter_charge_current",
+        name="Maximum AC Charging Current",
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        device_class=NumberDeviceClass.CURRENT,
+        native_min_value=0.0,
+        native_max_value=40.0,
+        native_step=1.0,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        register=InverterRegister.CHARGE_CURRENT,
+        scale=10.0,
+        retain_written_value=True,
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -348,12 +378,20 @@ async def async_setup_entry(
     renogy_data = hass.data[DOMAIN][config_entry.entry_id]
     coordinator = renogy_data["coordinator"]
 
-    # Get device type from config
+    # Get device type and model-specific inverter profile from config.
     device_type = config_entry.data.get(CONF_DEVICE_TYPE, DEFAULT_DEVICE_TYPE)
+    inverter_profile = config_entry.data.get(
+        CONF_INVERTER_PROFILE, DEFAULT_INVERTER_PROFILE
+    )
 
-    # Select the number descriptions for this device type
+    # Select the number descriptions for this device type/profile.
     if device_type == DeviceType.DCC.value:
         descriptions = DCC_ALL_NUMBERS
+    elif (
+        device_type == DeviceType.INVERTER.value
+        and inverter_profile == RIV4835CSH1S_INVERTER_PROFILE
+    ):
+        descriptions = RIV4835CSH1S_NUMBERS
     elif device_type == DeviceType.INVERTER.value and str(
         config_entry.data.get(CONF_DEVICE_NAME, "")
     ).startswith(RENOGY_REGO_INVERTER_PREFIX):
@@ -484,8 +522,11 @@ class RenogyNumberEntity(NumberEntity):
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        # Clear cached value to force a refresh
-        self._attr_native_value = None
+        # Normal entities clear cached values on every coordinator update. A
+        # validated write-only setpoint may retain the most recently written
+        # value until its model-specific polling profile gains readback support.
+        if not self.entity_description.retain_written_value:
+            self._attr_native_value = None
 
         # Update device reference if needed
         if not self._device and self.coordinator.device:
