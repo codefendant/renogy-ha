@@ -7,7 +7,6 @@ from typing import Optional, cast
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -30,12 +29,6 @@ from .const import (
     DCCRegister,
     DeviceType,
 )
-from .riv4835_output_priority import (
-    OUTPUT_PRIORITY_BY_RAW,
-    OUTPUT_PRIORITY_TO_RAW,
-    async_read_output_priority,
-    async_write_output_priority,
-)
 
 # Human-readable names for display
 BATTERY_TYPE_DISPLAY_NAMES = {
@@ -56,6 +49,10 @@ MAX_CURRENT_DISPLAY_TO_AMPS = {f"{amp}A": amp for amp in DCC_MAX_CURRENT_OPTIONS
 # Program 01 values 0/1/2 were hardware-validated for readback. Only the UTI/SBU
 # F06 writes have been hardware-validated so far; SOL remains visible for truthful
 # live state but is intentionally blocked as a write target in this test branch.
+RIV_OUTPUT_PRIORITY_BY_RAW = {0: "SOL", 1: "UTI", 2: "SBU"}
+RIV_OUTPUT_PRIORITY_TO_RAW = {
+    value: key for key, value in RIV_OUTPUT_PRIORITY_BY_RAW.items()
+}
 RIV_OUTPUT_PRIORITY_OPTIONS = ["SOL", "UTI", "SBU"]
 
 
@@ -154,7 +151,7 @@ class RenogyOutputPrioritySelect(SelectEntity):
 
     entity_description: SelectEntityDescription
     _attr_has_entity_name = True
-    _attr_should_poll = True
+    _attr_should_poll = False
 
     def __init__(
         self,
@@ -208,21 +205,35 @@ class RenogyOutputPrioritySelect(SelectEntity):
 
     async def async_update(self) -> None:
         """Refresh Program 01 directly from hardware register 0x1159."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        from .riv4835_output_priority import async_read_output_priority
+
         if not self._device and self.coordinator.device:
             self._device = self.coordinator.device
 
         try:
             raw = await async_read_output_priority(self.coordinator)
         except HomeAssistantError as err:
-            # Do not guess or preserve an optimistic value after a failed read.
+            # A normal coordinator poll can briefly own the BLE connection. Keep
+            # the last successful hardware readback in that case and retry on the
+            # next coordinator update rather than flashing an unknown state.
+            if "coordinator is busy" in str(err).lower():
+                LOGGER.debug("Deferred RIV4835 Output Priority refresh: %s", err)
+                return
+
             self._attr_current_option = None
-            LOGGER.debug("Unable to refresh RIV4835 Output Priority: %s", err)
+            LOGGER.warning("Unable to refresh RIV4835 Output Priority: %s", err)
             return
 
-        self._attr_current_option = OUTPUT_PRIORITY_BY_RAW[raw]
+        self._attr_current_option = RIV_OUTPUT_PRIORITY_BY_RAW[raw]
 
     async def async_select_option(self, option: str) -> None:
         """Write UTI/SBU and accept state only after authoritative readback."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        from .riv4835_output_priority import async_write_output_priority
+
         if option not in self._attr_options:
             raise HomeAssistantError(f"Unknown Output Priority option: {option}")
 
@@ -235,10 +246,23 @@ class RenogyOutputPrioritySelect(SelectEntity):
                 "Program 01 raw=0 has not yet been hardware-validated with F06."
             )
 
-        target = OUTPUT_PRIORITY_TO_RAW[option]
+        target = RIV_OUTPUT_PRIORITY_TO_RAW[option]
         verified = await async_write_output_priority(self.coordinator, target)
-        self._attr_current_option = OUTPUT_PRIORITY_BY_RAW[verified]
+        self._attr_current_option = RIV_OUTPUT_PRIORITY_BY_RAW[verified]
         self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """Refresh initially and after each normal coordinator update."""
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self._handle_coordinator_update)
+        )
+        self.async_schedule_update_ha_state(force_refresh=True)
+
+    def _handle_coordinator_update(self) -> None:
+        """Schedule a fresh hardware readback after a normal inverter poll."""
+        if not self._device and self.coordinator.device:
+            self._device = self.coordinator.device
+        self.async_schedule_update_ha_state(force_refresh=True)
 
 
 class RenogyBatteryTypeSelect(SelectEntity):
