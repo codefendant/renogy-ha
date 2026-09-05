@@ -35,7 +35,7 @@ def test_riv4835_output_priority_select_is_model_gated() -> None:
     entity = created_entities[0]
     assert isinstance(entity, select.RenogyOutputPrioritySelect)
     assert entity.entity_description.key == "output_priority"
-    assert entity.options == ["SOL", "UTI", "SBU"]
+    assert entity._attr_options == ["SOL", "UTI", "SBU"]
 
 
 def test_generic_inverter_does_not_get_output_priority_select() -> None:
