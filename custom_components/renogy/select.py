@@ -7,6 +7,7 @@ from typing import Optional, cast
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,15 +17,24 @@ from .ble import RenogyActiveBluetoothCoordinator, RenogyBLEDevice
 from .const import (
     ATTR_MANUFACTURER,
     CONF_DEVICE_TYPE,
+    CONF_INVERTER_PROFILE,
     DCC_BATTERY_TYPE_VALUES,
     DCC_BATTERY_TYPES,
     DCC_MAX_CURRENT_OPTIONS,
     DCC_MAX_CURRENT_TO_DEVICE,
     DEFAULT_DEVICE_TYPE,
+    DEFAULT_INVERTER_PROFILE,
     DOMAIN,
     LOGGER,
+    RIV4835CSH1S_INVERTER_PROFILE,
     DCCRegister,
     DeviceType,
+)
+from .riv4835_output_priority import (
+    OUTPUT_PRIORITY_BY_RAW,
+    OUTPUT_PRIORITY_TO_RAW,
+    async_read_output_priority,
+    async_write_output_priority,
 )
 
 # Human-readable names for display
@@ -43,6 +53,11 @@ MAX_CURRENT_OPTIONS = [f"{amp}A" for amp in DCC_MAX_CURRENT_OPTIONS]
 # Mapping from display string to amps
 MAX_CURRENT_DISPLAY_TO_AMPS = {f"{amp}A": amp for amp in DCC_MAX_CURRENT_OPTIONS}
 
+# Program 01 values 0/1/2 were hardware-validated for readback. Only the UTI/SBU
+# F06 writes have been hardware-validated so far; SOL remains visible for truthful
+# live state but is intentionally blocked as a write target in this test branch.
+RIV_OUTPUT_PRIORITY_OPTIONS = ["SOL", "UTI", "SBU"]
+
 
 DCC_SELECT_ENTITIES = (
     SelectEntityDescription(
@@ -53,6 +68,14 @@ DCC_SELECT_ENTITIES = (
     SelectEntityDescription(
         key="max_charging_current",
         name="Max Charging Current",
+        entity_category=EntityCategory.CONFIG,
+    ),
+)
+
+RIV_SELECT_ENTITIES = (
+    SelectEntityDescription(
+        key="output_priority",
+        name="Output Priority",
         entity_category=EntityCategory.CONFIG,
     ),
 )
@@ -71,43 +94,151 @@ async def async_setup_entry(
     renogy_data = hass.data[DOMAIN][config_entry.entry_id]
     coordinator = renogy_data["coordinator"]
 
-    # Get device type from config
     device_type = config_entry.data.get(CONF_DEVICE_TYPE, DEFAULT_DEVICE_TYPE)
+    device = coordinator.device
+    entities = []
 
-    # Only create select entities for DCC devices
-    if device_type != DeviceType.DCC.value:
+    if device_type == DeviceType.DCC.value:
+        LOGGER.debug("Setting up select entities for DCC device")
+        for description in DCC_SELECT_ENTITIES:
+            if description.key == "battery_type":
+                entity = RenogyBatteryTypeSelect(
+                    coordinator=coordinator,
+                    device=device,
+                    description=description,
+                    device_type=device_type,
+                )
+            elif description.key == "max_charging_current":
+                entity = RenogyMaxCurrentSelect(
+                    coordinator=coordinator,
+                    device=device,
+                    description=description,
+                    device_type=device_type,
+                )
+            else:
+                continue
+            entities.append(entity)
+
+    elif device_type == DeviceType.INVERTER.value:
+        profile = config_entry.data.get(CONF_INVERTER_PROFILE, DEFAULT_INVERTER_PROFILE)
+        if profile != RIV4835CSH1S_INVERTER_PROFILE:
+            LOGGER.debug(
+                "Skipping inverter select entities for non-RIV4835CSH1S profile: %s",
+                profile,
+            )
+            return
+
+        LOGGER.debug("Setting up RIV4835CSH1S output-priority select entity")
+        entities.append(
+            RenogyOutputPrioritySelect(
+                coordinator=coordinator,
+                device=device,
+                description=RIV_SELECT_ENTITIES[0],
+                device_type=device_type,
+            )
+        )
+
+    else:
         LOGGER.debug(
-            "Skipping select entities for non-DCC device type: %s", device_type
+            "Skipping select entities for unsupported device type: %s", device_type
         )
         return
-
-    LOGGER.debug("Setting up select entities for DCC device")
-
-    entities = []
-    device = coordinator.device
-
-    for description in DCC_SELECT_ENTITIES:
-        if description.key == "battery_type":
-            entity = RenogyBatteryTypeSelect(
-                coordinator=coordinator,
-                device=device,
-                description=description,
-                device_type=device_type,
-            )
-        elif description.key == "max_charging_current":
-            entity = RenogyMaxCurrentSelect(
-                coordinator=coordinator,
-                device=device,
-                description=description,
-                device_type=device_type,
-            )
-        else:
-            continue
-        entities.append(entity)
 
     if entities:
         LOGGER.debug("Adding %s select entities", len(entities))
         async_add_entities(entities)
+
+
+class RenogyOutputPrioritySelect(SelectEntity):
+    """RIV4835CSH1S Program 01 output-priority select with live readback."""
+
+    entity_description: SelectEntityDescription
+    _attr_has_entity_name = True
+    _attr_should_poll = True
+
+    def __init__(
+        self,
+        coordinator: RenogyActiveBluetoothCoordinator,
+        device: Optional[RenogyBLEDevice],
+        description: SelectEntityDescription,
+        device_type: str = DEFAULT_DEVICE_TYPE,
+    ) -> None:
+        """Initialize the RIV4835 output-priority select."""
+        self.coordinator = coordinator
+        self._device = device
+        self.entity_description = description
+        self._attr_options = RIV_OUTPUT_PRIORITY_OPTIONS
+        self._attr_current_option = None
+
+        if device:
+            self._attr_unique_id = f"{device.address}_{description.key}"
+            self._attr_name = cast("str | None", description.name)
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, device.address)},
+                name=device.name,
+                manufacturer=ATTR_MANUFACTURER,
+                model=RIV4835CSH1S_INVERTER_PROFILE,
+            )
+        else:
+            self._attr_unique_id = f"{coordinator.address}_{description.key}"
+            self._attr_name = cast("str | None", description.name)
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, coordinator.address)},
+                name=f"Renogy {device_type.upper()}",
+                manufacturer=ATTR_MANUFACTURER,
+                model=RIV4835CSH1S_INVERTER_PROFILE,
+            )
+
+    @property
+    def suggested_object_id(self) -> str | None:
+        """Preserve the legacy entity component before name resolution."""
+        if self._device is None:
+            return f"Renogy {self._attr_name}"
+        return super().suggested_object_id
+
+    @property
+    def available(self) -> bool:
+        """Return if the underlying inverter is available."""
+        return is_entity_available(self.coordinator, self._device)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return only the last authoritative Program 01 readback."""
+        return self._attr_current_option
+
+    async def async_update(self) -> None:
+        """Refresh Program 01 directly from hardware register 0x1159."""
+        if not self._device and self.coordinator.device:
+            self._device = self.coordinator.device
+
+        try:
+            raw = await async_read_output_priority(self.coordinator)
+        except HomeAssistantError as err:
+            # Do not guess or preserve an optimistic value after a failed read.
+            self._attr_current_option = None
+            LOGGER.debug("Unable to refresh RIV4835 Output Priority: %s", err)
+            return
+
+        self._attr_current_option = OUTPUT_PRIORITY_BY_RAW[raw]
+
+    async def async_select_option(self, option: str) -> None:
+        """Write UTI/SBU and accept state only after authoritative readback."""
+        if option not in self._attr_options:
+            raise HomeAssistantError(f"Unknown Output Priority option: {option}")
+
+        # SOL/raw=0 readback is hardware-validated, but an F06 write of raw=0 has
+        # not yet been validated on the user's RIV4835CSH1S. Keep it visible so a
+        # manual LCD change is represented truthfully, but refuse an unvalidated write.
+        if option == "SOL":
+            raise HomeAssistantError(
+                "SOL write is intentionally disabled in this test branch because "
+                "Program 01 raw=0 has not yet been hardware-validated with F06."
+            )
+
+        target = OUTPUT_PRIORITY_TO_RAW[option]
+        verified = await async_write_output_priority(self.coordinator, target)
+        self._attr_current_option = OUTPUT_PRIORITY_BY_RAW[verified]
+        self.async_write_ha_state()
 
 
 class RenogyBatteryTypeSelect(SelectEntity):
