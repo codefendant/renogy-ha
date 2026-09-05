@@ -11,6 +11,7 @@ from renogy_ble.ble import (
     INVERTER_DEVICE_ID,
     INVERTER_INIT_CHAR_UUID,
     INVERTER_INIT_DELAY,
+    create_modbus_write_request,
 )
 
 from .const import LOGGER, RIV4835CSH1SRegister
@@ -109,6 +110,63 @@ async def _read_from_session(client: Any, device: Any, session: Any) -> int:
     return raw
 
 
+async def _write_to_session(
+    client: Any,
+    device: Any,
+    session: Any,
+    target: int,
+) -> None:
+    """Issue exactly one F06 write to Program 01 on the active locked session."""
+    if target not in {1, 2}:
+        raise HomeAssistantError(
+            "Program 01 write is limited to hardware-validated values 1=UTI and 2=SBU."
+        )
+
+    reset_notifications = getattr(client, "_reset_notifications", None)
+    wait_for_write_response = getattr(client, "_wait_for_write_response", None)
+    if not callable(reset_notifications) or not callable(wait_for_write_response):
+        raise HomeAssistantError(
+            "Installed renogy-ble does not expose the validated write-response methods."
+        )
+
+    if session.client is None:
+        raise HomeAssistantError("Renogy BLE session is not connected.")
+
+    reset_notifications(session)
+    write_target = getattr(session, "write_target", None) or getattr(
+        client, "_write_char_uuid", None
+    )
+    if write_target is None:
+        raise HomeAssistantError("Renogy BLE write characteristic is unavailable.")
+
+    request = create_modbus_write_request(
+        INVERTER_DEVICE_ID,
+        RIV4835CSH1SRegister.OUTPUT_PRIORITY,
+        target,
+        function_code=0x06,
+    )
+
+    LOGGER.debug(
+        "RIV4835 Program 01 write register=0x1159 target=%d decoded=%s request=%s",
+        target,
+        OUTPUT_PRIORITY_BY_RAW[target],
+        request.hex(),
+    )
+
+    await session.client.write_gatt_char(write_target, request)
+    try:
+        await wait_for_write_response(
+            session,
+            RIV4835CSH1SRegister.OUTPUT_PRIORITY,
+            request,
+            0x06,
+        )
+    except asyncio.TimeoutError as err:
+        raise HomeAssistantError(
+            "Timed out waiting for the Program 01 F06 write acknowledgement."
+        ) from err
+
+
 async def _close_session_if_needed(client: Any, device: Any, session: Any) -> None:
     """Close an intermittent or desynchronized session after the transaction."""
     close_session = getattr(client, "_close_session", None)
@@ -127,43 +185,9 @@ async def _close_session_if_needed(client: Any, device: Any, session: Any) -> No
         await close_session(device.address, device.name, session, remove=False)
 
 
-async def async_read_output_priority(coordinator: Any) -> int:
-    """Read Program 01 with the coordinator connection lock held."""
-    if getattr(coordinator, "_connection_in_progress", False):
-        raise HomeAssistantError(
-            "Renogy coordinator is busy. Wait for the current poll to finish and retry."
-        )
-
-    connection_lock = getattr(coordinator, "_connection_lock", None)
-    if connection_lock is None:
-        raise HomeAssistantError("Renogy coordinator connection lock is unavailable.")
-
-    async with connection_lock:
-        coordinator._connection_in_progress = True
-        client = device = session = None
-        try:
-            client, device, session = await _prepare_locked_session(coordinator)
-            async with session.lock:
-                await _init_inverter_session(client, device, session)
-                raw = await _read_from_session(client, device, session)
-                LOGGER.debug(
-                    "RIV4835 Program 01 readback register=0x1159 raw=%d decoded=%s",
-                    raw,
-                    OUTPUT_PRIORITY_BY_RAW[raw],
-                )
-                return raw
-        finally:
-            try:
-                if client is not None and device is not None and session is not None:
-                    await _close_session_if_needed(client, device, session)
-            finally:
-                coordinator._connection_in_progress = False
-
-
-async def async_write_output_priority(coordinator: Any, target: int) -> int:
-    """Write a hardware-validated Program 01 target and verify live readback."""
-    # Only the UTI <-> SBU writes have been hardware-validated on this inverter.
-    if target not in {1, 2}:
+async def _run_transaction(coordinator: Any, target: int | None) -> int:
+    """Run one locked read or hardware-validated write/readback transaction."""
+    if target is not None and target not in {1, 2}:
         raise HomeAssistantError(
             "Program 01 write is limited to hardware-validated values 1=UTI and 2=SBU."
         )
@@ -185,49 +209,39 @@ async def async_write_output_priority(coordinator: Any, target: int) -> int:
             async with session.lock:
                 await _init_inverter_session(client, device, session)
                 current = await _read_from_session(client, device, session)
-                if current == target:
+
+                if target is None or current == target:
                     return current
 
-                write_single_register = getattr(client, "write_single_register", None)
-                if not callable(write_single_register):
+                await _write_to_session(client, device, session, target)
+                await asyncio.sleep(1.0)
+                verified = await _read_from_session(client, device, session)
+                if verified != target:
                     raise HomeAssistantError(
-                        "Installed renogy-ble does not expose validated single-register writes."
+                        "Program 01 write was acknowledged but live readback did not match: "
+                        f"target={target}/{OUTPUT_PRIORITY_BY_RAW[target]}, "
+                        f"readback={verified}/{OUTPUT_PRIORITY_BY_RAW[verified]}."
                     )
 
-                # The library method acquires the same session lock internally, so use
-                # the already-validated coordinator write path instead of nesting it.
-            # Release the BLE session lock before coordinator.async_write_register().
-            success = await coordinator.async_write_register(
-                RIV4835CSH1SRegister.OUTPUT_PRIORITY, target
-            )
-            if not success:
-                raise HomeAssistantError(
-                    f"Program 01 write to {OUTPUT_PRIORITY_BY_RAW[target]} was not acknowledged."
+                LOGGER.info(
+                    "RIV4835 Program 01 verified write register=0x1159 raw=%d decoded=%s",
+                    verified,
+                    OUTPUT_PRIORITY_BY_RAW[verified],
                 )
-
-            # The coordinator write path refreshes the device. Perform one independent
-            # authoritative F03 readback before reporting the selected state.
-            await asyncio.sleep(1.0)
+                return verified
         finally:
-            # coordinator.async_write_register() manages its own BLE transaction; any
-            # session prepared for the pre-read must be closed before the verify read.
             try:
                 if client is not None and device is not None and session is not None:
                     await _close_session_if_needed(client, device, session)
             finally:
                 coordinator._connection_in_progress = False
 
-    verified = await async_read_output_priority(coordinator)
-    if verified != target:
-        raise HomeAssistantError(
-            "Program 01 write was acknowledged but live readback did not match: "
-            f"target={target}/{OUTPUT_PRIORITY_BY_RAW[target]}, "
-            f"readback={verified}/{OUTPUT_PRIORITY_BY_RAW[verified]}."
-        )
 
-    LOGGER.info(
-        "RIV4835 Program 01 verified write register=0x1159 raw=%d decoded=%s",
-        verified,
-        OUTPUT_PRIORITY_BY_RAW[verified],
-    )
-    return verified
+async def async_read_output_priority(coordinator: Any) -> int:
+    """Return authoritative Program 01 readback from register 0x1159."""
+    return await _run_transaction(coordinator, target=None)
+
+
+async def async_write_output_priority(coordinator: Any, target: int) -> int:
+    """Write UTI/SBU and return only the independently verified readback."""
+    return await _run_transaction(coordinator, target=target)
