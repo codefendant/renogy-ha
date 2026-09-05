@@ -213,6 +213,17 @@ async def _run_transaction(coordinator: Any, target: int | None) -> int:
                 if target is None or current == target:
                     return current
 
+                # The only hardware-validated F06 transitions are UTI->SBU and
+                # SBU->UTI. If the LCD was manually put in SOL, represent that
+                # truthfully but require a manual return to UTI before writes resume.
+                if (current, target) not in {(1, 2), (2, 1)}:
+                    raise HomeAssistantError(
+                        "Refusing unvalidated Program 01 transition: "
+                        f"{OUTPUT_PRIORITY_BY_RAW[current]} -> "
+                        f"{OUTPUT_PRIORITY_BY_RAW[target]}. Return Program 01 to UTI "
+                        "manually if the inverter is currently in SOL."
+                    )
+
                 await _write_to_session(client, device, session, target)
                 await asyncio.sleep(1.0)
                 verified = await _read_from_session(client, device, session)
