@@ -45,6 +45,7 @@ from .const import (
     DeviceType,
 )
 from .hub_sensor import setup_hub_battery_sensors
+from .inverter_diagnostics import DIAGNOSTIC_DESCRIPTIONS
 
 # Registry of sensor keys
 KEY_BATTERY_VOLTAGE = "battery_voltage"
@@ -1079,6 +1080,16 @@ def create_entities_helper(
         sensor_groups = {
             **sensor_groups,
             "RIV4835CSH1S": RIV4835CSH1S_INVERTER_SENSORS,
+            "LCD Diagnostics": tuple(
+                RenogyBLESensorDescription(
+                    key=d.key,
+                    name=d.name,
+                    native_unit_of_measurement=d.native_unit_of_measurement,
+                    device_class=d.device_class,
+                    entity_category=d.entity_category,
+                )
+                for d in DIAGNOSTIC_DESCRIPTIONS
+            ),
         }
 
     # Group sensors by category
@@ -1242,6 +1253,10 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, RestoreEntity, SensorEn
     @property
     def available(self) -> bool:
         """Return if the sensor is available."""
+        if self.entity_description.key.startswith("riv_"):
+            data = self.device.parsed_data if self.device else self.coordinator.data
+            if not data or data.get(self.entity_description.key) is None:
+                return False
         return is_entity_available(self.coordinator, self._device)
 
     @property
@@ -1363,6 +1378,22 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, RestoreEntity, SensorEn
 
         # Add the device's RSSI as attribute if available
         device = self.device
+        if self.entity_description.key.startswith("riv_") and device:
+            diagnostic = device.parsed_data.get("riv_diagnostics", {})
+            attrs.update(
+                {
+                    "sampled_at": diagnostic.get("sampled_at"),
+                    "hardware_validated": diagnostic.get("hardware_validated", False),
+                }
+            )
+            if self.entity_description.key in (
+                "riv_active_faults",
+                "riv_fault_count",
+                "riv_active_warnings",
+                "riv_warning_mask",
+                "riv_operating_state",
+            ):
+                attrs.update(diagnostic)
         if device and hasattr(device, "rssi") and device.rssi is not None:
             attrs["rssi"] = device.rssi
 

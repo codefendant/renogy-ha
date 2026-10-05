@@ -14,6 +14,7 @@ from .const import (
     CONF_COMMUNICATION_HUB_ENABLED,
     CONF_DEVICE_NAME,
     CONF_DEVICE_TYPE,
+    CONF_INVERTER_DIAGNOSTICS,
     CONF_INVERTER_PROFILE,
     CONF_MAX_FAILURES,
     CONF_NON_SHUNT_CONNECTION_MODE,
@@ -106,6 +107,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device_data_callback=device_data_callback,
             communication_hub_enabled=True,
             model_hint=model_hint,
+            inverter_diagnostics=bool(
+                entry.options.get(CONF_INVERTER_DIAGNOSTICS, False)
+            ),
         )
     else:
         coordinator = RenogyActiveBluetoothCoordinator(
@@ -122,6 +126,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device_name=entry.data.get(CONF_DEVICE_NAME),
             device_data_callback=device_data_callback,
             model_hint=model_hint,
+            inverter_diagnostics=bool(
+                entry.options.get(CONF_INVERTER_DIAGNOSTICS, False)
+            ),
         )
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 

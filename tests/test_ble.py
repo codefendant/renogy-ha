@@ -510,6 +510,33 @@ def test_poll_skips_connection_during_unavailable_retry_cooldown():
     coordinator._ble_client.read_device.assert_not_awaited()
 
 
+def test_optional_inverter_diagnostics_failure_keeps_normal_telemetry():
+    """A failed diagnostic reader clears stale settings and preserves the poll."""
+    ble_module = _load_ble_module()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=MagicMock(),
+        logger=MagicMock(),
+        address="AA:BB:CC:DD:EE:FF",
+        device_type="inverter",
+        model_hint="RIV4835CSH1S",
+        inverter_diagnostics=True,
+    )
+    device = MagicMock(device_type="inverter")
+    device.parsed_data = {"battery_voltage": 50.2, "riv_program_04": 48.0}
+    coordinator.device = device
+    coordinator._ble_client.read_device = AsyncMock(
+        return_value=MagicMock(success=True, error=None)
+    )
+    coordinator._ble_client.read_inverter_diagnostics = AsyncMock(
+        side_effect=TimeoutError("diagnostic timeout")
+    )
+    assert asyncio.run(coordinator._read_device_data(None)) is True
+    assert device.parsed_data == {"battery_voltage": 50.2}
+    assert coordinator.data["battery_voltage"] == 50.2
+    assert coordinator.last_update_success is True
+    coordinator._ble_client.read_inverter_diagnostics.assert_awaited_once_with(device)
+
+
 def test_update_device_preserves_cached_manufacturer_data() -> None:
     """Later advertisements should not erase cached manufacturer data."""
     ble_module = _load_ble_module()

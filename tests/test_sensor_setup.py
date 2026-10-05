@@ -838,6 +838,48 @@ def test_inverter_sensors_cover_profile_fields() -> None:
     } == {"line_charging_current"}
 
 
+def test_riv_diagnostics_are_model_gated_and_missing_reads_unavailable() -> None:
+    """Read-only settings have values only after a fresh diagnostic read."""
+    sensor_module = _load_sensor_module()
+    device = MagicMock(address="AA:BB:CC:DD:EE:FF", name="Renogy Inverter")
+    device.parsed_data = {
+        "riv_program_04": 48.0,
+        "riv_active_faults": "01: Battery low voltage protection",
+        "riv_diagnostics": {
+            "fault_slots": [1, 0, 0, 0],
+            "hardware_validated": False,
+            "sampled_at": "now",
+        },
+    }
+    coordinator = MagicMock(address=device.address, device=device)
+    generic = sensor_module.create_entities_helper(
+        coordinator, device, sensor_module.DeviceType.INVERTER.value
+    )
+    assert not any(e.entity_description.key.startswith("riv_") for e in generic)
+    sensors = {
+        e.entity_description.key: e
+        for e in sensor_module.create_entities_helper(
+            coordinator,
+            device,
+            sensor_module.DeviceType.INVERTER.value,
+            sensor_module.RIV4835CSH1S_INVERTER_PROFILE,
+        )
+    }
+    assert sensors["riv_program_04"].native_value == 48.0
+    assert sensors["riv_program_04"].available
+    assert not sensors["riv_program_05"].available
+    assert sensors["riv_active_faults"].extra_state_attributes["fault_slots"] == [
+        1,
+        0,
+        0,
+        0,
+    ]
+    device.parsed_data = {"battery_voltage": 50.0}
+    sensors["riv_program_04"]._handle_coordinator_update()
+    assert sensors["riv_program_04"].native_value is None
+    assert not sensors["riv_program_04"].available
+
+
 def test_line_charging_current_only_created_for_riv_profile() -> None:
     """Generic inverters should not gain an unavailable RIV-only entity."""
     sensor_module = _load_sensor_module()

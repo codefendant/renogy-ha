@@ -117,6 +117,7 @@ class RenogyActiveBluetoothCoordinator(
         max_failures: int = DEFAULT_MAX_FAILURES,
         unavailable_retry_interval: int = DEFAULT_UNAVAILABLE_RETRY_INTERVAL,
         model_hint: str | None = None,
+        inverter_diagnostics: bool = False,
         device_name: str | None = None,
         device_data_callback: Callable[[RenogyBLEDevice], Awaitable[None]]
         | None = None,
@@ -148,6 +149,7 @@ class RenogyActiveBluetoothCoordinator(
         self.unavailable_retry_interval = unavailable_retry_interval
         self.device_type = device_type
         self.model_hint = model_hint
+        self.inverter_diagnostics = inverter_diagnostics
         self.last_poll_time: datetime | None = None
         self.device_data_callback = device_data_callback
         self.logger.debug(
@@ -1011,6 +1013,23 @@ class RenogyActiveBluetoothCoordinator(
                         error = Exception(str(error))
 
                 # Keep entities available until the configured failure threshold.
+                # Optional diagnostics must not affect ordinary poll availability.
+                for key in list(device.parsed_data):
+                    if key.startswith("riv_"):
+                        device.parsed_data.pop(key)
+                reader = getattr(self._ble_client, "read_inverter_diagnostics", None)
+                if (
+                    success
+                    and self.inverter_diagnostics
+                    and device.device_type == DeviceType.INVERTER.value
+                    and self.model_hint == "RIV4835CSH1S"
+                    and callable(reader)
+                ):
+                    try:
+                        device.parsed_data.update(await reader(device))
+                    except Exception as exc:
+                        self.logger.warning("Inverter diagnostics unavailable: %s", exc)
+
                 self._record_poll_availability(success, error)
 
                 # Update coordinator data if successful

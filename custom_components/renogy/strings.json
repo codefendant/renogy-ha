@@ -50,7 +50,8 @@
           "communication_hub_enabled": "Communication Hub / multiple batteries",
           "scan_interval": "Polling interval (seconds)",
           "max_failures": "Failed polls before unavailable",
-          "unavailable_retry_interval": "Reconnect interval while unavailable (minutes)"
+          "unavailable_retry_interval": "Reconnect interval while unavailable (minutes)",
+          "inverter_diagnostics": "Read LCD settings and faults (experimental)"
         }
       }
     }
