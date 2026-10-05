@@ -3,8 +3,9 @@
 The LCD manual lists 34 settings (01-29 and 35-39); 00 is an exit command.
 This draft adds protocol-based readback for 24 of those settings. Program 28
 already has hardware-validated readback and a writable number in upstream.
-Nine settings still lack a documented address in the source below. Do not
-claim full LCD coverage or deploy this draft over an existing patched install.
+Nine settings still lack a documented address in the source below. Full LCD
+readback remains unfinished. The compatibility installer below preserves the
+uploaded installation and refuses other baselines.
 
 ## Sources and current integration audit
 
@@ -77,16 +78,45 @@ firmware and must not retroactively be treated as a proven diagnosis.
 
 ## Activation and validation
 
-The companion HA branch creates read-only diagnostic sensors only for the
-RIV4835CSH1S profile. Extra traffic defaults off. Its options form adds
-"Read LCD settings and faults (experimental)". The companion library's
-`read_inverter_diagnostics()` uses only FC03 and cannot write settings.
-Older libraries continue normal polling with diagnostic entities unavailable.
+The compatibility branch was prepared from the uploaded installed integration,
+which declares version 0.10.0 and `renogy-ble==2.7.0`. Its Program 01 select,
+Program 28 number, cell monitoring, Hub polling, and dependency declaration
+are retained. The installer updates only explicitly listed diagnostic files;
+it does not install or modify the library.
 
-Both changes are required. Before installing, identify the currently installed
-HA and library revisions and preserve the existing cell and output-priority
-patches. The dependency pins remain unchanged until a supporting release is
-available; a standard 2.8.0 install does not contain this new reader.
+The RIV profile gains read-only diagnostic sensors. Extra reads default off.
+The existing options form adds "Read LCD settings and faults (experimental)".
+A local compatibility adapter uses the installed library's existing validated
+FC03 transport and session locking, like the existing Program 01 adapter.
+It never invokes a Modbus write function.
+
+## Install and activate
+
+Download the generated `renogy-readonly-diagnostics-install.sh` into `/config`
+on Home Assistant, then run:
+
+```bash
+bash /config/renogy-readonly-diagnostics-install.sh
+ha core check
+ha core restart
+```
+
+The installer checks every active source file from the supplied archive,
+stages and verifies all changed files, and saves a complete rollback backup
+before the first replacement. If any baseline file differs, it stops without
+changing files. Re-running an already completed installation is harmless.
+It retains the dependency pin and installs no Python packages.
+
+After HA starts, go to Settings > Devices & services > Renogy > Configure,
+set the polling interval to 60 seconds if it is shorter, and enable
+"Read LCD settings and faults (experimental)". Keep your current
+Communication Hub option and connection mode. The options change reloads
+the integration. Allow two polling cycles, then filter Developer Tools >
+States by `lcd_`. Programs 04, 05 and 06 appear as read-only sensors.
+
+The installer prints the backup path and a rollback command. If the new
+reads cause trouble, first disable the experimental option. To restore the
+code, run the printed rollback command and restart HA.
 
 Validate every displayed value against the physical LCD, especially Programs
 04, 05, 06 and 39. The protocol's voltage examples use a 12 V battery system;

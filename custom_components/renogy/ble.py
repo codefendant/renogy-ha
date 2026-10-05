@@ -1017,16 +1017,18 @@ class RenogyActiveBluetoothCoordinator(
                 for key in list(device.parsed_data):
                     if key.startswith("riv_"):
                         device.parsed_data.pop(key)
-                reader = getattr(self._ble_client, "read_inverter_diagnostics", None)
                 if (
                     success
                     and self.inverter_diagnostics
                     and device.device_type == DeviceType.INVERTER.value
                     and self.model_hint == "RIV4835CSH1S"
-                    and callable(reader)
                 ):
                     try:
-                        device.parsed_data.update(await reader(device))
+                        from .riv_diagnostic_reader import async_read_diagnostics
+
+                        device.parsed_data.update(
+                            await async_read_diagnostics(self._ble_client, device)
+                        )
                     except Exception as exc:
                         self.logger.warning("Inverter diagnostics unavailable: %s", exc)
 

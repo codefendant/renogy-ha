@@ -527,14 +527,17 @@ def test_optional_inverter_diagnostics_failure_keeps_normal_telemetry():
     coordinator._ble_client.read_device = AsyncMock(
         return_value=MagicMock(success=True, error=None)
     )
-    coordinator._ble_client.read_inverter_diagnostics = AsyncMock(
-        side_effect=TimeoutError("diagnostic timeout")
+    reader = AsyncMock(side_effect=TimeoutError("diagnostic timeout"))
+    module = cast(
+        Any, types.ModuleType("custom_components.renogy.riv_diagnostic_reader")
     )
-    assert asyncio.run(coordinator._read_device_data(None)) is True
+    module.async_read_diagnostics = reader
+    with patch.dict(sys.modules, {module.__name__: module}):
+        assert asyncio.run(coordinator._read_device_data(None)) is True
     assert device.parsed_data == {"battery_voltage": 50.2}
     assert coordinator.data["battery_voltage"] == 50.2
     assert coordinator.last_update_success is True
-    coordinator._ble_client.read_inverter_diagnostics.assert_awaited_once_with(device)
+    reader.assert_awaited_once_with(coordinator._ble_client, device)
 
 
 def test_update_device_preserves_cached_manufacturer_data() -> None:
