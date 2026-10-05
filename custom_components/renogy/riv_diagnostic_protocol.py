@@ -213,5 +213,11 @@ def parse_snapshot(words: dict[int, int], errors: dict[str, str]) -> dict[str, A
         if unknown:
             names.append(f"Unknown warning bits 0x{unknown:04X}")
         data["riv_warning_mask"] = raw
-        data["riv_active_warnings"] = "; ".join(names) or "None"
+        # The generic map has not been verified against this model's LCD alarms.
+        # Keep its candidates available without reporting them as confirmed alarms.
+        metadata["warning_mask_hex"] = f"0x{raw:04X}"
+        metadata["warning_bits_set"] = [bit for bit in range(16) if raw & (1 << bit)]
+        metadata["protocol_warning_candidates"] = names
+        metadata["warning_decode_status"] = "unverified_for_model"
+        data["riv_active_warnings"] = f"Unverified (0x{raw:04X})"
     return data

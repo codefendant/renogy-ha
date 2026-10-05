@@ -175,7 +175,14 @@ exit 0
 """
 
 
-def generate(baseline: Path, source: Path, output: Path) -> None:
+def generate(
+    baseline: Path,
+    source: Path,
+    output: Path,
+    *,
+    changed: tuple[str, ...] = CHANGED,
+    added: tuple[str, ...] = ADDED,
+) -> None:
     """Embed only the approved overlay, with original and resulting checksums."""
     baseline_names = sorted(
         p.relative_to(baseline).as_posix()
@@ -184,7 +191,13 @@ def generate(baseline: Path, source: Path, output: Path) -> None:
         and (p.suffix in {".py", ".json"})
         and "__pycache__" not in p.parts
     )
-    overlay = CHANGED + ADDED
+    overlay = changed + added
+    if not overlay or len(set(overlay)) != len(overlay):
+        raise ValueError("Specify a nonempty overlay of distinct files")
+    if any(name not in baseline_names for name in changed):
+        raise ValueError("Changed files must exist in the installed baseline")
+    if any(name in baseline_names for name in added):
+        raise ValueError("Added files must not exist in the installed baseline")
     lines = [HEADER]
     for name in baseline_names:
         digest = hashlib.sha256((baseline / name).read_bytes()).hexdigest()
@@ -194,8 +207,8 @@ def generate(baseline: Path, source: Path, output: Path) -> None:
         lines.append(f"new_hash['{name}']='{digest}'\n")
     for key, values in (
         ("baseline", baseline_names),
-        ("changed", CHANGED),
-        ("added", ADDED),
+        ("changed", changed),
+        ("added", added),
         ("overlay", overlay),
     ):
         lines.append(f"{key}=(" + " ".join(f"'{v}'" for v in values) + ")\n")

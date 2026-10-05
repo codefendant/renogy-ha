@@ -36,6 +36,9 @@ DIAGNOSTIC_DESCRIPTIONS = tuple(
         key=f"riv_program_{program:02d}",
         name=f"LCD {program:02d} {name}",
         native_unit_of_measurement=unit,
+        suggested_display_precision=(
+            1 if unit in {"V", "A"} else 2 if unit == "Hz" else 0 if unit else None
+        ),
         device_class=(
             SensorDeviceClass.VOLTAGE
             if unit == "V"

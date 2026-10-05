@@ -46,6 +46,7 @@ from .const import (
 )
 from .hub_sensor import setup_hub_battery_sensors
 from .inverter_diagnostics import DIAGNOSTIC_DESCRIPTIONS
+from .riv_diagnostic_protocol import PROGRAMS, READ_BLOCKS
 
 # Registry of sensor keys
 KEY_BATTERY_VOLTAGE = "battery_voltage"
@@ -1085,6 +1086,7 @@ def create_entities_helper(
                     key=d.key,
                     name=d.name,
                     native_unit_of_measurement=d.native_unit_of_measurement,
+                    suggested_display_precision=d.suggested_display_precision,
                     device_class=d.device_class,
                     entity_category=d.entity_category,
                 )
@@ -1386,6 +1388,36 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, RestoreEntity, SensorEn
                     "hardware_validated": diagnostic.get("hardware_validated", False),
                 }
             )
+            if self.entity_description.key.startswith("riv_program_"):
+                program = int(self.entity_description.key.removeprefix("riv_program_"))
+                register, divisor, _ = PROGRAMS[program]
+                raw = diagnostic.get("raw_registers", {}).get(str(register))
+                block = next(
+                    start
+                    for start, count in READ_BLOCKS
+                    if start <= register < start + count
+                )
+                error = diagnostic.get("read_errors", {}).get(str(block))
+                attrs.update(
+                    {
+                        "lcd_program": program,
+                        "register": register,
+                        "register_hex": f"0x{register:04X}",
+                        "raw_value": raw,
+                        "protocol_divisor": divisor,
+                        "read_status": (
+                            "unsupported"
+                            if raw == 0xFFFF
+                            else "read"
+                            if raw is not None
+                            else "read_error"
+                            if error is not None
+                            else "not_read"
+                        ),
+                    }
+                )
+                if error is not None:
+                    attrs["read_error"] = error
             if self.entity_description.key in (
                 "riv_active_faults",
                 "riv_fault_count",

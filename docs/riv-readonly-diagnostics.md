@@ -67,7 +67,11 @@ Current faults occupy four independent registers 4398-4401. Each holds a
 code, not a bitmask. All four slots must be fresh and supported before the
 aggregate says no faults. Unknown codes retain their numbers. 0xFFFF means
 unsupported; missing or unsupported slots produce unavailable fault entities.
-Warning register 4393 is a bitmask; known and unknown bits are retained.
+The generic protocol describes warning register 4393 as a bitmask. Its mapping
+has not been validated against this model's physical alarm display. The warning
+sensor therefore reports `Unverified (0xNNNN)`; the raw mask, set bits and generic
+protocol label candidates remain in attributes. A zero mask also remains
+unverified, rather than asserting that all hardware alarms are clear.
 Operating state is register 4405. The full modern protocol fault dictionary
 is included. This does not add a persistent hardware fault-history reader.
 
@@ -123,6 +127,37 @@ Validate every displayed value against the physical LCD, especially Programs
 the draft divides raw registers by 10 as documented, without guessing a
 48 V multiplier. Raw registers, UTC snapshot completion time, read errors,
 and `hardware_validated: false` are included in diagnostic attributes.
+Each setting also exposes its LCD number, register, raw value, divisor, and
+read status. An unsupported word (`65535`) is distinct from a failed read or
+one that has not run. Failed reads include the applicable block's error.
+Voltage and current settings suggest one decimal place, frequency two, and
+integer durations zero. Home Assistant entity-specific precision overrides
+can still take precedence; native states retain the protocol precision.
+
+## Follow-up after the first installation
+
+The user's first live snapshot returned Programs 04, 05 and 06, operating
+state `Grid`, four zero fault slots, and warning mask `50` (`0x0032`). The
+generic warning map labels that mask as simultaneous AC under/overvoltage
+and battery overvoltage, despite measured AC input of 115.5 V and battery
+voltage of 50.3 V. This is an unresolved mapping discrepancy, not proof that
+those alarms are active or that the inverter has no alarms. Do not silently
+substitute another bit map or infer that the flags are historical.
+
+The follow-up installer `renogy-diagnostics-precision-update.sh` applies to
+the completed first overlay. It updates only `sensor.py`,
+`inverter_diagnostics.py`, and `riv_diagnostic_protocol.py`, preserving the
+same controls, cell monitoring and library. Download it into `/config`, run
+it with Bash, then run `ha core check` and `ha core restart`. It verifies
+the first overlay's exact checksums and saves its own rollback backup.
+Its rollback restores the first diagnostic installation.
+
+Program 39 was unavailable in that snapshot. Inspect its `raw_value`,
+`read_status`, and any `read_error` before deciding whether the address is
+unsupported on this firmware or the BLE read failed. The device overview
+alone does not distinguish those cases. Compare the new precise voltage
+values and Program 06's `SnU` label against the physical LCD before treating
+the setting map as hardware validated.
 
 The snapshot spans sequential reads. It is not simultaneous. A failed block
 is omitted; its BLE session is discarded before any following command.

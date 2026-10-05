@@ -98,3 +98,39 @@ def test_mid_install_failure_restores_original_files(tmp_path):
         assert (target / name).read_bytes() == contents
     assert not any((target / name).exists() for name in ADDED)
     assert not list(target.rglob("*.renogy-new-*"))
+
+
+def test_followup_upgrade_and_rollback_preserve_the_first_overlay(tmp_path):
+    """A follow-up replaces existing diagnostics and restores its own baseline."""
+    root, installer, originals = fixture(tmp_path)
+    first = run(root, installer)
+    assert first.returncode == 0, first.stdout + first.stderr
+    target = root / "custom_components/renogy"
+    baseline = tmp_path / "v1"
+    shutil.copytree(target, baseline)
+    source = tmp_path / "new"
+    changed = ("sensor.py", "inverter_diagnostics.py", "riv_diagnostic_protocol.py")
+    for name in changed:
+        (source / name).write_text(f"second update {name}\n")
+    followup = tmp_path / "followup.sh"
+    generate(baseline, source, followup, changed=changed, added=())
+    result = run(root, followup)
+    assert result.returncode == 0, result.stdout + result.stderr
+    for name in changed:
+        assert (target / name).read_text() == f"second update {name}\n"
+    for name in ("number.py", "select.py", "hub.py", "manifest.json"):
+        assert (target / name).read_bytes() == originals[name]
+    assert (target / "riv_diagnostic_reader.py").read_bytes() == (
+        baseline / "riv_diagnostic_reader.py"
+    ).read_bytes()
+    again = run(root, followup)
+    assert again.returncode == 0
+    assert "already installed" in again.stdout
+    backups = list(root.glob("renogy-code-before-lcd-diagnostics-*.tar.gz"))
+    assert len(backups) == 2
+    backup = next(p for p in backups if str(p) in result.stdout)
+    restored = run(root, followup, "--rollback", str(backup))
+    assert restored.returncode == 0, restored.stdout + restored.stderr
+    for p in baseline.rglob("*"):
+        if p.is_file():
+            assert (target / p.relative_to(baseline)).read_bytes() == p.read_bytes()

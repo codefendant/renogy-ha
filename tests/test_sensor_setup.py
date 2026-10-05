@@ -843,12 +843,14 @@ def test_riv_diagnostics_are_model_gated_and_missing_reads_unavailable() -> None
     sensor_module = _load_sensor_module()
     device = MagicMock(address="AA:BB:CC:DD:EE:FF", name="Renogy Inverter")
     device.parsed_data = {
-        "riv_program_04": 48.0,
+        "riv_program_04": 48.8,
         "riv_active_faults": "01: Battery low voltage protection",
         "riv_diagnostics": {
             "fault_slots": [1, 0, 0, 0],
             "hardware_validated": False,
             "sampled_at": "now",
+            "raw_registers": {"4437": 488, "4456": 65535},
+            "read_errors": {"4439": "No valid diagnostic response"},
         },
     }
     coordinator = MagicMock(address=device.address, device=device)
@@ -865,9 +867,25 @@ def test_riv_diagnostics_are_model_gated_and_missing_reads_unavailable() -> None
             sensor_module.RIV4835CSH1S_INVERTER_PROFILE,
         )
     }
-    assert sensors["riv_program_04"].native_value == 48.0
+    assert sensors["riv_program_04"].native_value == 48.8
     assert sensors["riv_program_04"].available
+    assert sensors["riv_program_04"].entity_description.suggested_display_precision == 1
+    assert sensors["riv_program_02"].entity_description.suggested_display_precision == 2
+    assert sensors["riv_program_07"].entity_description.suggested_display_precision == 1
+    assert sensors["riv_program_10"].entity_description.suggested_display_precision == 0
+    attrs = sensors["riv_program_04"].extra_state_attributes
+    assert attrs["register"] == 4437
+    assert attrs["raw_value"] == 488
+    assert attrs["protocol_divisor"] == 10
+    assert attrs["read_status"] == "read"
     assert not sensors["riv_program_05"].available
+    attrs = sensors["riv_program_05"].extra_state_attributes
+    assert attrs["read_status"] == "read_error"
+    assert attrs["read_error"] == "No valid diagnostic response"
+    assert not sensors["riv_program_39"].available
+    attrs = sensors["riv_program_39"].extra_state_attributes
+    assert attrs["read_status"] == "unsupported"
+    assert attrs["raw_value"] == 65535
     assert sensors["riv_active_faults"].extra_state_attributes["fault_slots"] == [
         1,
         0,
@@ -878,6 +896,10 @@ def test_riv_diagnostics_are_model_gated_and_missing_reads_unavailable() -> None
     sensors["riv_program_04"]._handle_coordinator_update()
     assert sensors["riv_program_04"].native_value is None
     assert not sensors["riv_program_04"].available
+    attrs = sensors["riv_program_04"].extra_state_attributes
+    assert attrs["read_status"] == "not_read"
+    assert attrs["raw_value"] is None
+    assert "read_error" not in attrs
 
 
 def test_line_charging_current_only_created_for_riv_profile() -> None:
